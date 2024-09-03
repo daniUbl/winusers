@@ -1,26 +1,32 @@
 ﻿#===========================================================================
 # OCS Inventory Reports - For Versions: Windows Server 2008, 2012 R2 and 2016
 # Plugin WinUsers 
-# version 1.0 - 14/08/2024
+# version 1.0.1 - 03/09/2024
 #
 # modify by Umbler.com
 #===========================================================================
 
 # Function to get Admin user status
 function Get-AdminUser {
-    param([string] $username)
+	param([string] $username)
 
-    $admingroup = net localgroup Administrators
-    $userType = "Local"
+	$admingroup = ""
+	try {
+		$admingroup = net localgroup Administrators
+	} catch {
+   	$admingroup = Get-WmiObject -Class Win32_Group -Filter "Name='Administrators'" | ForEach-Object { $_.GetRelated('Win32_UserAccount') } | Select-Object -ExpandProperty Name
+	}
 
-    foreach ($member in $admingroup) {
-        if ($member.Trim() -eq $username) {
-            $userType = "Admin"
-            break
-        }
-    }
+	$userType = "Local"
 
-    return $userType
+	foreach ($member in $admingroup) {
+		if ($member.Trim() -eq $username) {
+			$userType = "Admin"
+			break
+		}
+	}
+
+	return $userType
 }
 
 
@@ -40,7 +46,13 @@ function Get-Size
 function Check-User-IIS {
 	param([string] $username)
 
-	$iisgroup = net localgroup IIS_IUSRS
+	$iisgroup = ""
+	try {
+		$iisgroup = net localgroup IIS_IUSRS
+	} catch {
+		$iisgroup = Get-WmiObject -Class Win32_Group -Filter "Name='IIS_IUSRS'" | ForEach-Object { $_.GetRelated('Win32_UserAccount') } | Select-Object -ExpandProperty Name
+	}
+
 	$descriptionCheck = ""
 
 	foreach ($member in $iisgroup){
@@ -58,7 +70,13 @@ function Check-User-IIS {
 function Check-User-Remote {
 	param([string] $username)
 
-	$remotegroup = net localgroup "Remote Desktop Users"
+	$remotegroup = ""
+	try {
+		$remotegroup = net localgroup "Remote Desktop Users"
+	} catch {
+		$remotegroup = Get-WmiObject -Class Win32_Group -Filter "Name='Remote Desktop Users'" | ForEach-Object { $_.GetRelated('Win32_UserAccount') } | Select-Object -ExpandProperty Name
+	}
+
 	$descriptionCheck = ""
 
 	foreach ($member in $remotegroup){
@@ -139,5 +157,5 @@ foreach ($user in $users) {
 }
 
 
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
 [Console]::WriteLine($xml)
