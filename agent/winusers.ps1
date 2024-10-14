@@ -1,3 +1,5 @@
+## DEFAULT AGENT
+
 # Function to get Admin user status
 function Get-AdminUser {
 	param([string] $username)

@@ -5,30 +5,8 @@
 # OCS Inventory Reports - For All Versions of Windows Servers
 # Description: Busca por todos os usuários do sistema, verifica se é Administrator ou Local, verifica se faz pate do grupo Remote Desktop Users ou do grupo IIS_IUSR, verifica e contabiliza logons de usuários de acordo com os eventos do Event View.
 # version 1.0 - 10/10/2024
-# Last Modified: 10/10/2024
+# Last Modified: 14/10/2024
 #===========================================================================
-
-$versionOS = (Get-WmiObject -class Win32_OperatingSystem).Caption
-# removendo o nome 'Microsoft Windows Server' e também os espaços da string e pegando apenas as 4 primeiras posições da string:
-$yearOS = (($versionOS -replace "Microsoft Windows Server", "" ) -replace "\s", "").Substring(0, 4)
-
-# tenta converter o ano, que é uma string, em um número (int)
-try {
-    if ($yearOS -match "^\d{4}$") {
-        $yearOS = [int]$yearOS
-    }
-
-    # chama a função a depender do ano da versão do Windows Server
-    if ($yearOS -ge 2019) {
-        Windows-Recents
-    } else {
-        Windows-OldAndLegacy
-    }
-
-} catch {
-    return
-}
-
 
 # ----------- funções complementares
 
@@ -120,17 +98,12 @@ function Check-User-Remote {
 }
 
 
-function WriteXML($xml) {
-    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-    [Console]::WriteLine($xml)
-}
-
 # ----------- funções principais
 #################################
 #          Local User           #
 #################################
 # versões 2019 ou superiores
-function Windows-Recents {
+function WindowsRecents {
     $users = Get-LocalUser | Select *
     $pathUsers = "C:\Users"
     $allUsers = @()
@@ -239,12 +212,12 @@ function Windows-Recents {
         $xml += "</WINUSERS>`n"
     }
 
-    WriteXML -xml $xml
+    return $xml
 }
 
 
 # versões 2016, 2012 e 2008
-function Windows-OldAndLegacy {
+function WindowsOldAndLegacy {
     # Obtém todos os usuários locais e remove o cabeçalho e as linhas vazias
     $users = (wmic useraccount get name | Select-Object -Skip 1) | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne "" }
     $pathUsers = "C:\Users"
@@ -285,13 +258,12 @@ function Windows-OldAndLegacy {
                         $numberRemoteConnexion = $numberRemoteConnexion + 1
                         $ipRemote = $userconnection.ReplacementStrings[18]
                     }
-
                 }
                 
 
                 # Verifica o tipo de Usuário (Local ou Administrator)
                 $isAdmin = net localgroup Administrators | Select-String -Pattern "\b$user\b" -Quiet
-                $userType = if ($isAdmin) { "Administrador" } else { "Usuário Local" }
+                $userType = if ($isAdmin) { "Administrador" } else { "Usuario Local" }
                 
                 # Status do usuário (Ativo/Inativo)
                 $isActive = if ($userDetails -match "Account active\s+Yes") { "Ativo" } else { "Inativo" }
@@ -299,7 +271,7 @@ function Windows-OldAndLegacy {
                 # SSID do usuário
                 $userSID = (Get-WmiObject -Class Win32_UserAccount -Filter "Name='$userName'").SID
                 if (-not $userSID) {
-                    $userSID = "Não disponível"
+                    $userSID = "Nao disponivel"
                 } 
 
                 # Último logon do usuário
@@ -309,13 +281,17 @@ function Windows-OldAndLegacy {
                 }
                 else {
                     $ultimoLogon = $lastLogon -replace 'Last logon\s+', ''
-                    $lastLogon = [datetime]::ParseExact($ultimoLogon, 'M/d/yyyy h:mm:ss tt', $null).ToString('dd/MM/yyyy HH:mm:ss')
+                    try {                        
+                        $lastLogon = [datetime]::ParseExact($ultimoLogon, 'M/d/yyyy h:mm:ss tt', $null).ToString('dd/MM/yyyy HH:mm:ss')
+                    } catch {
+                            $lastLogon = $ultimoLogon
+                    }
                 }
 
                 # Caminho da pasta do usuário
                 $userProfilePath = "C:\Users\$userName"
                 if (-not (Test-Path $userProfilePath)) {
-                    $userProfilePath = "Não disponível"
+                    $userProfilePath = "Nao disponivel"
                     $folderSizeMB = "N/A"
                 } else {
                     # Calcula o tamanho da pasta do usuário em MB
@@ -351,11 +327,51 @@ function Windows-OldAndLegacy {
                 $allUsers += $user.Name
 
             } catch {
-                Write-Warning "Erro ao processar o usuário $user : $_"
+                Write-Warning "Erro ao processar o usuario $user : $_"
             }
         }
     }
 
-
-    WriteXML -xml $xml
+    return $xml
 }
+
+
+# extrai as informações de versão do S.O:
+$versionOS = Get-WmiObject -Class Win32_OperatingSystem
+
+# com base na versão é determinado o ano correspondente do S.O do Windows Server:
+switch ($versionOS.Version) {
+    {$_ -like "10.0*"} {
+        # Usando o BuildNumber para diferenciar 2016, 2019 e 2022
+        if ($versionOS.BuildNumber -ge 20348) {
+            $yearOS = 2022 # Windows Server 2022
+        } elseif ($versionOS.BuildNumber -ge 17763) {
+            $yearOS = 2019 # Windows Server 2019
+        } else {
+            $yearOS = 2016 # Windows Server 2016
+        }
+        break
+    }
+    {$_ -like "6.3*"}  { $yearOS = 2012; break } # Windows Server 2012 R2
+    {$_ -like "6.2*"}  { $yearOS = 2012; break } # Windows Server 2012
+    {$_ -like "6.1*"}  { $yearOS = 2008; break } # Windows Server 2008 R2
+    {$_ -like "6.0*"}  { $yearOS = 2006; break } # Windows Server 2006
+    default { $yearOS = "Versão desconhecida" }
+}
+
+
+# start verificações
+try {
+    if ($yearOS -ge 2019) {
+        $xml = WindowsRecents
+    } else {
+        $xml = WindowsOldAndLegacy
+    }
+} catch {
+   Write-Warning "$yearOS - Erro na versão do SO`n"
+   Write-Host $_
+}
+
+try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
+[Console]::WriteLine($xml)
+
